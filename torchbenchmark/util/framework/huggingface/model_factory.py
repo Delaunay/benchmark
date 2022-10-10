@@ -8,6 +8,22 @@ import transformers
 from transformers import AutoConfig, ReformerConfig, BertConfig
 from typing import Tuple
 
+try:
+    import datetime
+    import shutil
+    cutoff_time = 1665201846.337524
+    inductor_path = "/tmp/torchinductor_dberard"
+    if os.path.exists(inductor_path):
+        last_modified = os.path.getmtime(inductor_path)
+        print("!! INDUCTORCACHE", inductor_path, "last modified", last_modified, datetime.datetime.fromtimestamp(last_modified))
+        if last_modified < cutoff_time:
+            print("      Cache is too old. Deleting it now.")
+            shutil.rmtree(inductor_path)
+    else:
+        print("!! INDUCTORCACHE does not exist")
+except Exception as e:
+    print(e)
+
 class_models = {
     # 'name': (train_max_length, eval_max_length, config, model)
     'hf_GPT2': (512, 1024, 'AutoConfig.from_pretrained("gpt2")', 'AutoModelForCausalLM'),
@@ -124,7 +140,7 @@ class HuggingFaceModel(BenchmarkModel):
         outputs = self.model(**self.example_inputs)
         loss = outputs.loss
         loss.backward()
-        self.optimizer.step()
+        # self.optimizer.step()
 
     def eval(self) -> Tuple[torch.Tensor]:
         with torch.no_grad():

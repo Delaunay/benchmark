@@ -6,6 +6,11 @@ import torchvision.models as models
 from torchbenchmark.util.model import BenchmarkModel
 from typing import Tuple, Generator, Optional
 
+import torchdynamo
+torchdynamo.config.verbose = True
+import logging
+torchdynamo.config.log_level = logging.DEBUG
+
 class TorchVisionModel(BenchmarkModel):
     # To recognize this is a torchvision model
     TORCHVISION_MODEL = True

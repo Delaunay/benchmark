@@ -219,13 +219,13 @@ def main():
     # print(job.results())
 
     models = [
-        # 'torchbenchmark.models.hf_Bert.Model',
+        'torchbenchmark.models.hf_Bert.Model',
         # # 'torchbenchmark.models.hf_BertLarge.Model',
-        # 'torchbenchmark.models.hf_GPT2_large.Model',
-        # 'torchbenchmark.models.hf_T5_large.Model',
-        # 'torchbenchmark.models.timm_vision_transformer_large.Model',
+        'torchbenchmark.models.hf_GPT2_large.Model',
+        'torchbenchmark.models.hf_T5_large.Model',
+        'torchbenchmark.models.timm_vision_transformer_large.Model',
         # # 'torchbenchmark.models.hf_GPT2.Model',
-        # 'torchbenchmark.models.hf_T5.Model',
+        'torchbenchmark.models.hf_T5.Model',
         'torchbenchmark.models.resnet50.Model',
     ]
 
@@ -248,7 +248,7 @@ def main():
     # node_list = [1, 2, 4, 8, 12, 16, 20, 24]
     # node_list = [1, 2, 4, 8, 12]
     # node_list = [1, 2, 4, 8, 12, 16]
-    node_list = [2]
+    node_list = [1]
 
     def get_backend_name(model_args):
         if "--torchdynamo" in model_args:
@@ -258,6 +258,7 @@ def main():
     for nodes in node_list:
         for model_name in models:
             for model_args in model_args_configs:
+                # for has_breaks in [get_backend_name(model_args) != "eager"]:
                 for has_breaks in [True, False]:
                     backend_name = get_backend_name(model_args)
                     if backend_name == "eager" and has_breaks:

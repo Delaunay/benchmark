@@ -27,7 +27,6 @@ def apply_torchdynamo_args(model: 'torchbenchmark.util.model.BenchmarkModel', ar
     optimize_ddp_context = contextlib.nullcontext
 
     if args.optimize_dynamo_ddp:
-        import torchdynamo
         @contextlib.contextmanager
         def optimize_ddp_ctx(val: bool):
             old_value = torchdynamo.config.optimize_ddp
@@ -38,18 +37,17 @@ def apply_torchdynamo_args(model: 'torchbenchmark.util.model.BenchmarkModel', ar
                 torchdynamo.config.optimize_ddp = old_value
         optimize_ddp_context = lambda: optimize_ddp_ctx(True)
 
-    with optimize_ddp_context():
-        if args.torchdynamo == "fx2trt" and precision == "fp16":
-            dynamo_optimizer = torchdynamo.optimize(torchdynamo.optimizations.backends.fx2trt_compiler_fp16)
-        else:
-            dynamo_optimizer = torchdynamo.optimize(args.torchdynamo)
-        # evaluate extra python code passed by the user
-        if args.extra_py_args:
-            exec(args.extra_py_args)
-        if model.test == "train":
-            model.train = dynamo_optimizer(model.train)
-        else:
-            model.eval = dynamo_optimizer(model.eval)
+    if args.torchdynamo == "fx2trt" and precision == "fp16":
+        dynamo_optimizer = torchdynamo.optimize(torchdynamo.optimizations.backends.fx2trt_compiler_fp16)
+    else:
+        dynamo_optimizer = torchdynamo.optimize(args.torchdynamo)
+    # evaluate extra python code passed by the user
+    if args.extra_py_args:
+        exec(args.extra_py_args)
+    if model.test == "train":
+        model.train = dynamo_optimizer(model.train)
+    else:
+        model.eval = dynamo_optimizer(model.eval)
 
     model.add_context(optimize_ddp_context)
 
