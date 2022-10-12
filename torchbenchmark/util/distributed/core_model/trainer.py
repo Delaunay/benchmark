@@ -29,7 +29,10 @@ class Trainer():
         self.model_class = model_class
         self.mode = mode
 
+        print("getting local rank")
+
         self.local_rank = int(os.getenv("LOCAL_RANK", -1))
+        print(f"got local rank {self.local_rank}")
         self.setup()
 
         # specify the name of the distributed trainer
@@ -47,6 +50,7 @@ class Trainer():
 
 
     def setup(self):
+        print("the core_model.trainer setup")
         if self.mode == "SPMD":
             # set the visible devices so that each SPMD process only sees one
             # CUDA device
@@ -80,61 +84,63 @@ class Trainer():
             raise ValueError(f"Unrecognized distributed training mode {self.mode}")
 
     def measure(self):
-        niters = self.DEFAULT_MEASURE_ITERATIONS
+        try:
+            niters = self.DEFAULT_MEASURE_ITERATIONS
 
-        ######################################
-        # 1. warming up CUDACachingAllocator #
-        ######################################
-        for _ in range(self.DEFAULT_MEASURE_ITERATIONS):
-            self.benchmark.invoke()
+            ######################################
+            # 1. warming up CUDACachingAllocator #
+            ######################################
+            for _ in range(self.DEFAULT_MEASURE_ITERATIONS):
+                self.benchmark.invoke()
 
-        # wait for all pending CUDA ops to finish
-        torch.cuda.synchronize(device=self.local_rank)
+            # wait for all pending CUDA ops to finish
+            torch.cuda.synchronize(device=self.local_rank)
 
-        now = datetime.now()
-        name = f"{type(self).__name__}_{now.strftime('%Y_%m_%d_%H_%M_%S')}"
-        ##################################################################
-        # 2. measure raw delays and memory to rule out profiler overhead #
-        ##################################################################
-        events_pre_train = [Event(enable_timing=True) for _ in range(niters)]
-        events_post_train = [Event(enable_timing=True) for _ in range(niters)]
-        for i in range(niters):
-            events_pre_train[i].record()
-            self.benchmark.invoke()
-            events_post_train[i].record()
+            now = datetime.now()
+            name = f"{type(self).__name__}_{now.strftime('%Y_%m_%d_%H_%M_%S')}"
+            ##################################################################
+            # 2. measure raw delays and memory to rule out profiler overhead #
+            ##################################################################
+            events_pre_train = [Event(enable_timing=True) for _ in range(niters)]
+            events_post_train = [Event(enable_timing=True) for _ in range(niters)]
+            for i in range(niters):
+                events_pre_train[i].record()
+                self.benchmark.invoke()
+                events_post_train[i].record()
 
-        # wait for all pending CUDA ops to finish
-        torch.cuda.synchronize(device=self.local_rank)
+            # wait for all pending CUDA ops to finish
+            torch.cuda.synchronize(device=self.local_rank)
 
-        latency_train = [pre.elapsed_time(post) for pre, post in zip(events_pre_train, events_post_train)]
-        median_latency = np.median(latency_train)
-        stdev_latency = stdev(latency_train)
+            latency_train = [pre.elapsed_time(post) for pre, post in zip(events_pre_train, events_post_train)]
+            median_latency = np.median(latency_train)
+            stdev_latency = stdev(latency_train)
 
 
-        if self.args.profiler:
-            # N.B.: disable PyTorch Profiler by default due to
-            # https://github.com/pytorch/pytorch/issues/75369
-            ################################################
-            # 3. meausre complete metrics through profiler #
-            ################################################
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                record_shapes=True, # Causes seg fault in export_chrome_trace
-                with_stack=True, # Causes seg fault with EFA
-                with_flops=True, # Causes seg fault in export_chrome_trace
-                on_trace_ready=tensorboard_trace_handler(
-                    f"{self.args.job_dir}/tb/{name}",
-                    self.rank,
-                    use_gzip=True,
-                )
-            ):
-                for i in range(niters):
-                    self.benchmark.invoke()
+            if self.args.profiler:
+                # N.B.: disable PyTorch Profiler by default due to
+                # https://github.com/pytorch/pytorch/issues/75369
+                ################################################
+                # 3. meausre complete metrics through profiler #
+                ################################################
+                with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    record_shapes=True, # Causes seg fault in export_chrome_trace
+                    with_stack=True, # Causes seg fault with EFA
+                    with_flops=True, # Causes seg fault in export_chrome_trace
+                    on_trace_ready=tensorboard_trace_handler(
+                        f"{self.args.job_dir}/tb/{name}",
+                        self.rank,
+                        use_gzip=True,
+                    )
+                ):
+                    for i in range(niters):
+                        self.benchmark.invoke()
 
-        # wait for all pending CUDA ops to finish
-        torch.cuda.synchronize(device=self.local_rank)
-        # wait for all peers to finish
-        dist.barrier(device_ids=[self.local_rank])
+            # wait for all pending CUDA ops to finish
+            torch.cuda.synchronize(device=self.local_rank)
+        finally:
+            # wait for all peers to finish
+            dist.barrier(device_ids=[self.local_rank])
 
         return {
             "latency_median" : median_latency,

@@ -18,57 +18,6 @@ import multiprocessing
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-class BasicBarrier:
-    FILE_POLL_PERIOD = 0.5  # seconds
-    INIT_WAIT_TIME = 30  # seconds
-    MSG_BYTES = 64
-
-    def __init__(self, rank, world_size, sync_file):
-        self.rank = rank
-        self.world_size = world_size
-        self.sync_file = sync_file
-        self.recv_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.recv_socket.bind((socket.gethostname(), 0))
-        self.recv_socket.listen()
-
-        if self.rank == 0:
-            self._primary_init()
-        else:
-            self._secondary_init()
-
-    def _primary_init(self):
-        with open(self.sync_file, "w") as f:
-            f.write(f"self.gethostname()}:{self.recv_socket.getsockname()[1]}")
-
-    def _secondary_init(self):
-        for i in range(int(self.INIT_WAIT_TIME / self.FILE_POLL_PERIOD))
-            with open(self.sync_file, "r") as f:
-                content = f.read()
-                if len(content) > 0:
-                    break
-            time.sleep(self.FILE_POLL_PERIOD)
-         if len(content) == 0:
-             sys.stderr.write(f"Could not find barrier initialization info in f{self.sync_file}\n")
-            sys.exit(1)
-        primary_hostname, primary_port = content.split(":")
-        primary_port = int(primary_port)
-
-
-    def barrier(self):
-        pass
-
-    def _primary_barrier(self):
-        pass
-
-    def _secondary_barrier(self):
-        pass
-
-    def _pad_msg(self, msg):
-        while len(msg) < self.MSG_BYTES:
-            msg += b'\0'
-        assert len(msg) == self.MSG_BYTES
-        return msg
-
 def output_csv(filename, headers, row):
     assert filename
     existed = os.path.exists(filename)
@@ -152,7 +101,8 @@ def parse_args(args: List[str]=None):
     parser.add_argument(
         "--trainer",
         type=str,
-        default="torchbenchmark.util.distributed.core_model.trainer.Trainer",
+        # default="torchbenchmark.util.distributed.core_model.trainer.Trainer",
+        default="userbenchmark.ddp_experiments.trainer.ReuseAllocationTrainer",
         help="training paradigm, by default using DDP"
     )
     parser.add_argument(
@@ -224,29 +174,31 @@ class TrainerWrapper(object):
     def __call__(self):
         results = []
 
-        self._setup_runner_pgroup()
+        # self._setup_runner_pgroup()
         job_env = submitit.JobEnvironment()
         print(f"This is node {job_env.node}")
         for (config, args, model_args) in self.per_experiment_args:
-            try:
-                if job_env.node >= args.nodes:
-                    continue
-                result_dict = {**config}
-                q = multiprocessing.Queue()
-                proc = multiprocessing.Process(target=self.run_once, args=(args, model_args, q))
-                proc.start()
-                proc.join()
-                print(f"exit code: {proc.exitcode} and result: {result_dict}")
-                if proc.exitcode == 0:
-                    result_dict['result'] = q.get()
-                else:
-                    result_dict['result'] = None
-                # wrap in <RESULT></RESULT> so we can parse partial results in the stdout logs
-                print(f"<RESULT>{json.dumps(result_dict)}</RESULT>")
-                assert 'result' in result_dict
-                results.append(result_dict)
-            finally:
-                torch.distributed.barrier()
+            result_dict = {**config}
+            q = multiprocessing.Queue()
+
+            args_copy = copy.deepcopy(args)
+            if job_env.node >= args.nodes:
+                args_copy.trainer = "userbenchmark.ddp_experiments.trainer.EmptyTrainer"
+            else:
+                args_copy.trainer = "userbenchmark.ddp_experiments.trainer.ReuseAllocationTrainer"
+
+            proc = multiprocessing.Process(target=self.run_once, args=(args_copy, model_args, q))
+            proc.start()
+            proc.join()
+            print(f"exit code: {proc.exitcode} and result: {result_dict}")
+            if proc.exitcode == 0:
+                result_dict['result'] = q.get()
+            else:
+                result_dict['result'] = None
+            # wrap in <RESULT></RESULT> so we can parse partial results in the stdout logs
+            print(f"<RESULT>{json.dumps(result_dict)}</RESULT>")
+            assert 'result' in result_dict
+            results.append(result_dict)
 
         return results
 
@@ -330,9 +282,9 @@ def main():
         # # 'torchbenchmark.models.hf_BertLarge.Model',
         # 'torchbenchmark.models.hf_GPT2_large.Model',
         # 'torchbenchmark.models.hf_T5_large.Model',
-        # 'torchbenchmark.models.timm_vision_transformer_large.Model',
-        # # 'torchbenchmark.models.hf_GPT2.Model',
         'torchbenchmark.models.hf_T5.Model',
+        'torchbenchmark.models.timm_vision_transformer_large.Model',
+        # # 'torchbenchmark.models.hf_GPT2.Model',
         'torchbenchmark.models.resnet50.Model',
     ]
 

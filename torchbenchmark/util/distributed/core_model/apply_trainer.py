@@ -4,7 +4,14 @@ import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
+# TODO(dberard) make this less global
+trainer_pg = None
+def set_process_group(pg):
+    global trainer_pg
+    trainer_pg = pg
+
 def apply_trainer(model, trainer):
+    global trainer_pg
     local_rank = int(os.getenv("LOCAL_RANK", -1))
 
     if trainer == "ddp":
@@ -18,6 +25,7 @@ def apply_trainer(model, trainer):
             gradient_as_bucket_view=True,
             # TODO: tune bucket_cap_mb
             static_graph=False,
+            process_group=trainer_pg ,
         )
         return ddp_model
     elif trainer == "fsdp":
